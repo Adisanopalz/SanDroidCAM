@@ -456,8 +456,12 @@
                 this.els.receiverLoading.classList.remove('hidden');
                 this.els.receiverVideo.srcObject = null;
                 
-                // Clear URL params if any
-                window.history.pushState({}, document.title, window.location.pathname);
+                // Clear URL params if any (dibungkus dengan try-catch)
+                try {
+                    window.history.pushState({}, document.title, window.location.pathname);
+                } catch (e) {
+                    console.warn("Tidak dapat mengubah URL history (mengabaikan error di lingkungan blob/iframe):", e);
+                }
             },
 
             resetIdleTimer() {

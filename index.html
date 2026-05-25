@@ -381,26 +381,29 @@
                 if (this.isSender) {
                     // SENDER: Listen for ping (data connection) from receiver
                     this.peer.on('connection', (conn) => {
-                        // FIX: Menunggu data channel benar-benar 'open' sebelum memanggil peer.call
-                        // Mencegah 'abort' race condition di signaling state.
-                        conn.on('open', () => {
-                            this.els.senderStatusText.innerText = "Tersambung (LIVE)";
-                            this.els.senderStatusDot.className = "w-3 h-3 rounded-full bg-red-500 recording-indicator";
-                            this.showToast('OBS Terhubung!', 'success');
-                            
-                            // Call back the receiver with local media stream
-                            const call = this.peer.call(conn.peer, this.localStream);
-                            this.conn = call;
-                            
-                            call.on('close', () => {
-                                this.els.senderStatusText.innerText = "PC Terputus. Menunggu...";
-                                this.els.senderStatusDot.className = "w-3 h-3 rounded-full bg-yellow-500";
-                                this.conn = null;
-                            });
-                            
-                            call.on('error', (err) => {
-                                console.error("Call Error:", err);
-                            });
+                        // FIX: Mendengarkan event 'data' spesifik ('ping') dari receiver 
+                        // untuk memastikan saluran data sudah mantap (established) 
+                        // sebelum memulai transmisi video (media stream).
+                        conn.on('data', (data) => {
+                            if (data === 'ping') {
+                                this.els.senderStatusText.innerText = "Tersambung (LIVE)";
+                                this.els.senderStatusDot.className = "w-3 h-3 rounded-full bg-red-500 recording-indicator";
+                                this.showToast('OBS Terhubung!', 'success');
+                                
+                                // Call back the receiver with local media stream
+                                const call = this.peer.call(conn.peer, this.localStream);
+                                this.conn = call;
+                                
+                                call.on('close', () => {
+                                    this.els.senderStatusText.innerText = "PC Terputus. Menunggu...";
+                                    this.els.senderStatusDot.className = "w-3 h-3 rounded-full bg-yellow-500";
+                                    this.conn = null;
+                                });
+                                
+                                call.on('error', (err) => {
+                                    console.error("Call Error:", err);
+                                });
+                            }
                         });
                     });
                 } else {

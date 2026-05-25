@@ -256,8 +256,8 @@
             },
 
             generateRoomId() {
-                // Generate simple random ID like "cam-x7y9"
-                return 'cam-' + Math.random().toString(36).substring(2, 6);
+                // Generate slightly longer random ID to prevent collisions (cam-x7y9z1)
+                return 'cam-' + Math.random().toString(36).substring(2, 8);
             },
 
             // ==========================================
@@ -372,21 +372,21 @@
                         this.els.senderStatusText.innerText = "Menunggu Koneksi PC...";
                         this.els.senderStatusDot.className = "w-3 h-3 rounded-full bg-blue-500";
                     } else {
-                        // If receiver, automatically call the sender
+                        // If receiver, automatically ping the sender to trigger the video call
                         this.els.receiverStatusText.innerText = "Mencari HP (" + this.roomId + ")...";
-                        this.callSender();
+                        this.connectToSender();
                     }
                 });
 
-                this.peer.on('call', (call) => {
-                    // Receiver connecting to Sender
-                    if (this.isSender) {
+                if (this.isSender) {
+                    // SENDER: Listen for ping (data connection) from receiver
+                    this.peer.on('connection', (conn) => {
                         this.els.senderStatusText.innerText = "Tersambung (LIVE)";
                         this.els.senderStatusDot.className = "w-3 h-3 rounded-full bg-red-500 recording-indicator";
                         this.showToast('OBS Terhubung!', 'success');
                         
-                        // Answer the call with local stream
-                        call.answer(this.localStream);
+                        // Call back the receiver with local media stream
+                        const call = this.peer.call(conn.peer, this.localStream);
                         this.conn = call;
                         
                         call.on('close', () => {
@@ -394,47 +394,68 @@
                             this.els.senderStatusDot.className = "w-3 h-3 rounded-full bg-yellow-500";
                             this.conn = null;
                         });
-                    }
-                });
+                    });
+                } else {
+                    // RECEIVER: Listen for incoming media call from sender
+                    this.peer.on('call', (call) => {
+                        call.answer(); // Answer without sending stream
+                        
+                        call.on('stream', (remoteStream) => {
+                            this.els.receiverStatusText.innerText = "Video Terhubung";
+                            this.els.receiverLoading.classList.add('hidden');
+                            this.els.receiverVideo.srcObject = remoteStream;
+                            
+                            // Unmute requirement for some browsers
+                            this.els.receiverVideo.muted = false;
+                            this.els.receiverVideo.play().catch(e => {
+                                console.log("Autoplay prevented, keeping muted", e);
+                                this.els.receiverVideo.muted = true;
+                                this.els.receiverVideo.play();
+                            });
+                        });
+
+                        call.on('close', () => {
+                            this.els.receiverLoading.classList.remove('hidden');
+                            this.els.receiverStatusText.innerText = "Koneksi Terputus. Reconnecting...";
+                            this.els.receiverVideo.srcObject = null;
+                            setTimeout(() => this.connectToSender(), 2000);
+                        });
+                    });
+                }
 
                 this.peer.on('error', (err) => {
                     console.error("PeerJS Error:", err);
-                    this.showToast('Error koneksi: ' + err.type, 'error');
-                    if (!this.isSender && err.type === 'peer-unavailable') {
-                        this.els.receiverStatusText.innerText = "Kamera belum siap/ID Salah.";
-                        setTimeout(() => this.callSender(), 3000); // Retry
+                    
+                    if (err.type === 'peer-unavailable' || err.type === 'network' || err.type === 'server-error') {
+                        if (!this.isSender) {
+                            this.els.receiverStatusText.innerText = "Kamera belum siap/ID Salah. Retrying...";
+                            setTimeout(() => this.connectToSender(), 3000);
+                        } else {
+                            // If sender fails on initialization due to taken ID or network, notify
+                            this.showToast('Koneksi bermasalah. Restarting...', 'error');
+                            if (err.type === 'unavailable-id') {
+                                this.stopApp();
+                            }
+                        }
+                    } else {
+                        this.showToast('Error koneksi: ' + err.type, 'error');
                     }
                 });
             },
 
-            callSender() {
-                if (!this.peer || this.isSender) return;
+            connectToSender() {
+                if (!this.peer || this.isSender || this.peer.destroyed) return;
                 
-                this.els.receiverStatusText.innerText = "Menghubungkan ke Video...";
-                const call = this.peer.call(this.roomId, null); // Call without sending stream
+                this.els.receiverStatusText.innerText = "Menghubungkan ke HP...";
                 
-                if(!call) return; // Wait for open event
-
-                call.on('stream', (remoteStream) => {
-                    this.els.receiverStatusText.innerText = "Video Terhubung";
-                    this.els.receiverLoading.classList.add('hidden');
-                    this.els.receiverVideo.srcObject = remoteStream;
-                    
-                    // Unmute requirement for some browsers
-                    this.els.receiverVideo.muted = false;
-                    this.els.receiverVideo.play().catch(e => {
-                        console.log("Autoplay prevented, keeping muted", e);
-                        this.els.receiverVideo.muted = true;
-                        this.els.receiverVideo.play();
+                // Establish a data connection to "ping" the sender.
+                const conn = this.peer.connect(this.roomId);
+                
+                if (conn) {
+                    conn.on('open', () => {
+                        this.els.receiverStatusText.innerText = "Meminta Video...";
                     });
-                });
-
-                call.on('close', () => {
-                    this.els.receiverLoading.classList.remove('hidden');
-                    this.els.receiverStatusText.innerText = "Koneksi Terputus. Reconnecting...";
-                    this.els.receiverVideo.srcObject = null;
-                    setTimeout(() => this.callSender(), 2000);
-                });
+                }
             },
 
             // ==========================================
